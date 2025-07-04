@@ -1,4 +1,6 @@
-![n8n on Google Cloud Run Architecture](public/images/header.png)
+<p align="center">
+  <img src="public/images/header.png" alt="n8n on Google Cloud Run Architecture" width="400" />
+</p>
 
 # n8n on Google Cloud Run
 
