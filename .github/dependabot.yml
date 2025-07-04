@@ -1,0 +1,52 @@
+version: 2
+updates:
+  # GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "@me"  # Replace with your GitHub username
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # Docker dependencies (for base images)
+  - package-ecosystem: "docker"
+    directory: "/iac"
+    schedule:
+      interval: "weekly"
+      day: "monday"  
+      time: "06:30"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "@me"  # Replace with your GitHub username
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # Terraform dependencies
+  - package-ecosystem: "terraform"
+    directory: "/iac"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "06:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "@me"  # Replace with your GitHub username
+    labels:
+      - "dependencies"
+      - "terraform"
+    commit-message:
+      prefix: "chore"
+      include: "scope" 

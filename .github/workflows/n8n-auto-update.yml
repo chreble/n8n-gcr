@@ -1,0 +1,224 @@
+name: N8N Auto Update and Build
+
+on:
+  # Check for updates daily at 6 AM UTC
+  schedule:
+    - cron: '0 6 * * *'
+  
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build even if no new version'
+        required: false
+        default: false
+        type: boolean
+      n8n_version:
+        description: 'Specific n8n version to build (optional)'
+        required: false
+        type: string
+
+  # Trigger on pushes to main (for workflow changes)
+  push:
+    branches: [ main ]
+    paths: 
+      - 'iac/Dockerfile'
+      - 'iac/startup.sh'
+      - '.github/workflows/n8n-auto-update.yml'
+
+env:
+  REGISTRY_REGION: europe-west1
+  
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.version-check.outputs.should_build }}
+      latest_version: ${{ steps.version-check.outputs.latest_version }}
+      current_version: ${{ steps.version-check.outputs.current_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for new n8n version
+        id: version-check
+        run: |
+          # Get latest n8n version from GitHub API
+          LATEST_VERSION=$(curl -s https://api.github.com/repos/n8n-io/n8n/releases/latest | jq -r '.tag_name' | sed 's/^n8n@//')
+          echo "Latest n8n version: $LATEST_VERSION"
+          
+          # Get current version from our last build (stored in git tag or file)
+          CURRENT_VERSION=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 | sed 's/^v//' || echo "0.0.0")
+          echo "Current built version: $CURRENT_VERSION"
+          
+          # Check if manual version is specified
+          if [ "${{ github.event.inputs.n8n_version }}" != "" ]; then
+            LATEST_VERSION="${{ github.event.inputs.n8n_version }}"
+            echo "Using manual version: $LATEST_VERSION"
+          fi
+          
+          # Determine if we should build
+          SHOULD_BUILD="false"
+          if [ "${{ github.event.inputs.force_build }}" == "true" ]; then
+            SHOULD_BUILD="true"
+            echo "Force build requested"
+          elif [ "$LATEST_VERSION" != "$CURRENT_VERSION" ]; then
+            SHOULD_BUILD="true"
+            echo "New version detected: $CURRENT_VERSION -> $LATEST_VERSION"
+          else
+            echo "No new version available"
+          fi
+          
+          # Set outputs
+          echo "should_build=$SHOULD_BUILD" >> $GITHUB_OUTPUT
+          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+  build-and-push:
+    needs: check-version
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        gcp_project: 
+          # Add your GCP project IDs here
+          - ${{ vars.GCP_PROJECT_ID }}
+          # - ${{ vars.GCP_PROJECT_ID_PROD }}  # Uncomment for multiple environments
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.REGISTRY_REGION }}-docker.pkg.dev
+
+      - name: Build and push Docker image
+        run: |
+          # Set image details
+          VERSION=${{ needs.check-version.outputs.latest_version }}
+          PROJECT_ID=${{ matrix.gcp_project }}
+          IMAGE_BASE="${{ env.REGISTRY_REGION }}-docker.pkg.dev/${PROJECT_ID}/n8n/n8n"
+          
+          # Update Dockerfile to use specific version
+          sed -i "s|FROM docker.n8n.io/n8nio/n8n:latest|FROM docker.n8n.io/n8nio/n8n:${VERSION}|" iac/Dockerfile
+          
+          # Build and push with multiple tags
+          cd iac
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --tag "${IMAGE_BASE}:${VERSION}" \
+            --tag "${IMAGE_BASE}:latest" \
+            --push \
+            .
+          
+          echo "Built and pushed: ${IMAGE_BASE}:${VERSION}"
+
+      - name: Create git tag
+        if: matrix.gcp_project == vars.GCP_PROJECT_ID  # Only tag once
+        run: |
+          VERSION=${{ needs.check-version.outputs.latest_version }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${VERSION}" -m "n8n version ${VERSION}"
+          git push origin "v${VERSION}"
+
+  deploy-dev:
+    needs: [check-version, build-and-push]
+    if: needs.check-version.outputs.should_build == 'true' && vars.AUTO_DEPLOY_DEV == 'true'
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to Cloud Run (Dev)
+        run: |
+          VERSION=${{ needs.check-version.outputs.latest_version }}
+          PROJECT_ID=${{ vars.GCP_PROJECT_ID }}
+          SERVICE_NAME="${{ vars.CLOUD_RUN_SERVICE_NAME || 'n8n' }}"
+          REGION="${{ vars.GCP_REGION || 'us-west2' }}"
+          IMAGE="${{ env.REGISTRY_REGION }}-docker.pkg.dev/${PROJECT_ID}/n8n/n8n:${VERSION}"
+          
+          gcloud run deploy $SERVICE_NAME \
+            --image=$IMAGE \
+            --region=$REGION \
+            --project=$PROJECT_ID \
+            --quiet
+
+  create-release:
+    needs: [check-version, build-and-push]
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ needs.check-version.outputs.latest_version }}
+          release_name: n8n v${{ needs.check-version.outputs.latest_version }}
+          body: |
+            🚀 **Automated build for n8n v${{ needs.check-version.outputs.latest_version }}**
+            
+            This release contains the updated n8n container image built from the official n8n v${{ needs.check-version.outputs.latest_version }} release.
+            
+            ## What's included:
+            - ✅ n8n v${{ needs.check-version.outputs.latest_version }}
+            - ✅ Multi-architecture support (amd64, arm64)
+            - ✅ Custom startup script for Cloud Run compatibility
+            - ✅ Automatic container registry push
+            
+            ## Deployment:
+            The container image is available at:
+            ```
+            ${{ env.REGISTRY_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/n8n/n8n:${{ needs.check-version.outputs.latest_version }}
+            ```
+            
+            ## Changes from previous version:
+            - Previous: v${{ needs.check-version.outputs.current_version }}
+            - Current: v${{ needs.check-version.outputs.latest_version }}
+            
+            For n8n-specific changes, see: https://github.com/n8n-io/n8n/releases/tag/n8n@${{ needs.check-version.outputs.latest_version }}
+          draft: false
+          prerelease: false
+
+  notify:
+    needs: [check-version, build-and-push]
+    if: always() && needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify success
+        if: needs.build-and-push.result == 'success'
+        run: |
+          echo "✅ Successfully built n8n v${{ needs.check-version.outputs.latest_version }}"
+          # Add Slack/Discord/Email notification here if desired
+
+      - name: Notify failure
+        if: needs.build-and-push.result == 'failure'
+        run: |
+          echo "❌ Failed to build n8n v${{ needs.check-version.outputs.latest_version }}"
+          # Add failure notification here if desired 
