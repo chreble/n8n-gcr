@@ -1,0 +1,82 @@
+# Scheduled upgrade pipeline – checks upstream n8n release daily, builds & deploys if new.
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+substitutions:
+  _REGION: europe-west1
+  _REPO_NAME: n8n-dev-repo
+
+steps:
+# ---------------------------------------------------------------------------
+# 1. Determine latest release tag from GitHub
+# ---------------------------------------------------------------------------
+- name: 'ubuntu'
+  id: fetch-version
+  entrypoint: bash
+  args:
+    - -c
+    - |
+      set -e
+      LATEST=$(curl -s https://api.github.com/repos/n8n-io/n8n/releases/latest | grep 'tag_name' | head -1 | sed -E 's/.*"n8n@([^"]+)".*/\1/')
+      echo "Latest n8n version: $LATEST"
+      echo "LATEST=$LATEST" >> /workspace/latest.env
+
+# ---------------------------------------------------------------------------
+# 2. Skip build if image already exists in Artifact Registry
+# ---------------------------------------------------------------------------
+- name: gcr.io/cloud-builders/gcloud
+  id: check-image
+  entrypoint: bash
+  args:
+    - -c
+    - |
+      set -e
+      source /workspace/latest.env
+      IMAGE="$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:$LATEST"
+      if gcloud artifacts docker images describe "$IMAGE" >/dev/null 2>&1; then
+        echo "Image $IMAGE already present – exiting early" && exit 0
+      fi
+
+# ---------------------------------------------------------------------------
+# 3. Build & push new image
+# ---------------------------------------------------------------------------
+- name: gcr.io/cloud-builders/docker
+  id: build
+  args:
+    - 'build'
+    - '-t'
+    - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:$LATEST'
+    - '-t'
+    - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:latest'
+    - '--build-arg'
+    - "N8N_VERSION=$LATEST"
+    - '--platform=linux/amd64'
+    - '.'
+
+- name: gcr.io/cloud-builders/docker
+  id: push
+  args:
+    - 'push'
+    - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:$LATEST'
+
+- name: gcr.io/cloud-builders/docker
+  id: push-latest
+  args:
+    - 'push'
+    - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:latest'
+
+# ---------------------------------------------------------------------------
+# 4. Terraform apply – roll out the new image
+# ---------------------------------------------------------------------------
+- name: 'hashicorp/terraform:1.10.2'
+  id: terraform-apply
+  entrypoint: /bin/sh
+  args:
+    - -c
+    - |
+      tofu init -input=false
+      tofu apply -auto-approve
+
+images:
+- '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:$LATEST'
+- '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:latest' 

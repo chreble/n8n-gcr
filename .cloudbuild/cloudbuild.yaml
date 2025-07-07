@@ -1,0 +1,51 @@
+# Continuous Deployment pipeline for n8n on Cloud Run
+# Builds the Docker image and runs `tofu apply` to roll out the new image.
+
+substitutions:
+  _REGION: europe-west1          # ↳ override in trigger if necessary
+  _REPO_NAME: n8n-dev-repo
+  _SERVICE_NAME: n8n             # Cloud Run service name
+
+steps:
+# ---------------------------------------------------------------------------
+# Build & push Docker image tagged with commit SHA *and* latest
+# ---------------------------------------------------------------------------
+- name: 'gcr.io/cloud-builders/docker'
+  id: build
+  args:
+    - 'build'
+    - '-t'
+    - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:$SHORT_SHA'
+    - '-t'
+    - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:latest'
+    - '--platform=linux/amd64'
+    - '.'
+
+- name: 'gcr.io/cloud-builders/docker'
+  id: push
+  args:
+    - 'push'
+    - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:$SHORT_SHA'
+
+- name: 'gcr.io/cloud-builders/docker'
+  id: push-latest
+  args:
+    - 'push'
+    - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:latest'
+
+# ---------------------------------------------------------------------------
+# Infrastructure as Code – roll out the image (and any other changes)
+# ---------------------------------------------------------------------------
+- name: 'hashicorp/terraform:1.10.2'
+  id: terraform-apply
+  entrypoint: /bin/sh
+  args:
+    - '-c'
+    - |
+      set -e
+      tofu init -input=false
+      tofu apply -auto-approve
+
+images:
+- '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:$SHORT_SHA'
+- '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:latest' 

@@ -60,6 +60,157 @@ gcloud auth configure-docker REGION-docker.pkg.dev
 docker push REGION-docker.pkg.dev/PROJECT_ID/REPO_NAME/n8n:latest
 ```
 
+### 4. Automatic n8n Version Upgrades
+
+Want n8n to update itself whenever a new upstream release appears?  Cloud Build
+supports **scheduled triggers** (no external GitHub Actions required).
+
+1.  Create a new build config at `.cloudbuild/cloudbuild-upgrade.yaml`:
+
+```yaml
+# cloudbuild-upgrade.yaml – nightly check & build the latest n8n
+options:
+  logging: CLOUD_LOGGING_ONLY
+substitutions:
+  _REGION: europe-west1
+  _REPO_NAME: n8n-repo
+steps:
+# --- Detect latest upstream version ---------------------------------
+- name: ubuntu
+  id: fetch-version
+  entrypoint: /bin/bash
+  args:
+    - -c
+    - |
+      set -e
+      LATEST=$(curl -s https://api.github.com/repos/n8n-io/n8n/releases/latest | jq -r '.tag_name' | sed 's/^n8n@//')
+      echo "LATEST=$LATEST" >> $BUILD_ENV/substitutions.env
+
+# --- Build & push image (skipped if already present) ----------------
+- name: gcr.io/cloud-builders/docker
+  id: build-push
+  entrypoint: /bin/bash
+  args:
+    - -c
+    - |
+      source $BUILD_ENV/substitutions.env
+      IMAGE="$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:$LATEST"
+      if gcloud artifacts docker images describe "$IMAGE" >/dev/null 2>&1; then
+        echo "Image $IMAGE already exists – nothing to do." && exit 0
+      fi
+      docker build -t "$IMAGE" --build-arg N8N_VERSION="$LATEST" --platform linux/amd64 .
+      docker push "$IMAGE"
+
+# --- Terraform apply ------------------------------------------------
+- name: hashicorp/terraform:1.10.2
+  id: deploy
+  dir: infrastructure
+  entrypoint: /bin/sh
+  args:
+    - -c
+    - |
+      source $BUILD_ENV/substitutions.env
+      tofu init && tofu apply -auto-approve -var "container_image=$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:$LATEST"
+```
+
+2.  Create a scheduled trigger that runs every morning:
+
+```bash
+gcloud builds triggers create schedule \
+  --name="n8n-nightly-upgrade" \
+  --schedule="0 6 * * *" \
+  --build-config=.cloudbuild/cloudbuild-upgrade.yaml \
+  --substitutions=_REGION="europe-west1",_REPO_NAME="n8n-repo"
+```
+
+The trigger:
+• Pulls the latest release version from GitHub
+• Skips the build if the exact tag already exists in Artifact Registry
+• Otherwise builds the new image, pushes it, and runs `tofu apply` so Cloud Run
+  is updated – fully automated!
+
+## 🔄 Continuous Deployment with Cloud Build
+
+Google Cloud Build can automatically build, push, and **apply your IaC** every
+time you push to your repository (Cloud Source Repositories, GitHub, or
+Bitbucket).  The basic flow is:
+
+1. A commit is pushed to the main branch.
+2. Cloud Build builds the Docker image and pushes it to Artifact Registry.
+3. Cloud Build runs `tofu apply` so the new image is rolled out via your
+   Terraform/OpenTofu code (keeps all changes in IaC).
+
+### 1. Enable the API & grant permissions
+
+```bash
+# Enable Cloud Build and Artifact Registry APIs
+gcloud services enable cloudbuild.googleapis.com artifactregistry.googleapis.com
+
+# Allow Cloud Build to deploy to Cloud Run & read secrets
+PROJECT_ID=$(gcloud config get-value project)
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member=serviceAccount:$PROJECT_NUMBER@cloudbuild.gserviceaccount.com \
+  --role=roles/run.admin
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member=serviceAccount:$PROJECT_NUMBER@cloudbuild.gserviceaccount.com \
+  --role=roles/iam.serviceAccountUser
+```
+
+### 2. `cloudbuild.yaml`
+
+Place the following file at the root of the repo (or in
+`.cloudbuild/cloudbuild.yaml`).  It:
+
+1. Builds an n8n image tagged with the commit SHA
+2. Pushes the image to Artifact Registry
+3. Runs `tofu init` & `tofu apply` to roll the Cloud Run service to the new
+   image (and apply any other infra changes)
+
+```yaml
+# cloudbuild.yaml
+substitutions:
+  _REGION: europe-west1        # ↳ override in the trigger if needed
+  _REPO_NAME: n8n-repo         # ↳ must match modules/container repository
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build','-t','$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:$SHORT_SHA','--platform','linux/amd64','.']
+
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push','$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:$SHORT_SHA']
+
+# === IaC deployment ===
+- name: 'hashicorp/terraform:1.10.2'
+  entrypoint: /bin/sh
+  dir: 'infrastructure'   # ↳ path containing your *.tf files
+  args:
+    - '-c'
+    - |
+      tofu init && \
+      tofu apply -auto-approve -var "container_image=$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:$SHORT_SHA"
+images:
+- '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/n8n:$SHORT_SHA'
+```
+
+### 3. Create the trigger
+
+Create a Cloud Build trigger that fires on a commit to your
+`main` (or whichever) branch.  Example for **Cloud Source Repositories**:
+
+```bash
+gcloud builds triggers create cloud-source-repos \
+  --repo=n8n-gcr \
+  --branch-pattern="^main$" \
+  --build-config=cloudbuild.yaml \
+  --substitutions=_REGION="europe-west1",_REPO_NAME="n8n-repo"
+```
+
+If you host code on GitHub or Bitbucket, choose the corresponding trigger type
+in the Cloud Build UI – the `cloudbuild.yaml` stays the same.
+
+Every push now builds the image **and** applies infrastructure changes in a
+single pipeline – no separate GitHub Actions required.
+
 ## 📋 Configuration
 
 ### Required Variables
