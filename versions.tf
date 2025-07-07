@@ -1,18 +1,22 @@
 terraform {
-  required_version = ">= 1.6"
+  required_version = ">= 1.6.0"  # OpenTofu uses Terraform's versioning
   required_providers {
     google = {
       source  = "hashicorp/google"
-      version = ">= 4.0"
+      version = "~> 6.0"
     }
     google-beta = {
       source  = "hashicorp/google-beta"
-      version = ">= 4.0"
+      version = ">= 6.0"
     }
     neon = {
       source  = "kislerdm/neon"
       version = ">= 0.6.0"
     }
+  }
+
+  backend "gcs" {
+    # Will be filled via -backend-config
   }
 }
 

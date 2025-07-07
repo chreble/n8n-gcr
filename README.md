@@ -1,343 +1,285 @@
-<p align="center">
-  <img src="public/images/header.png" alt="n8n on Google Cloud Run Architecture" width="400" />
-</p>
+# n8n on Google Cloud Run - Modular OpenTofu Deployment
 
-# n8n on Google Cloud Run
+This directory contains a modular OpenTofu architecture for deploying n8n (workflow automation platform) on Google Cloud Run with Identity Aware Proxy (IAP) protection.
 
-A complete Infrastructure as Code solution for deploying n8n (workflow automation platform) on Google Cloud Run with enterprise-grade security and cost optimization.
+## 🏗️ Architecture Overview
 
-## ✨ Features
+The deployment is organized into focused, reusable modules:
 
-- **🚀 Serverless deployment** on Google Cloud Run with automatic scaling
-- **🔒 Identity Aware Proxy (IAP)** protection with Google authentication  
-- **💾 Flexible database options** - Cloud SQL or NeonDB PostgreSQL
-- **🔑 Secure secret management** with Google Secret Manager
-- **💰 Cost-efficient** with pay-per-use pricing and scale-to-zero capability
-- **🔧 Modular architecture** with reusable OpenTofu/Terraform modules
-- **🌐 HTTPS load balancer** with automatic SSL certificate management
-- **⚡ Multiple deployment scenarios** for different use cases and budgets
+```
+iac/
+├── modules/
+│   ├── secrets/     # Secret Manager resources and IAM policies
+│   ├── database/    # Cloud SQL PostgreSQL or external database support
+│   ├── container/   # Artifact Registry for Docker images
+│   ├── compute/     # Cloud Run service and service account
+│   └── iap/         # Load balancer, IAP, and SSL certificates
 
-## 🏗️ Architecture
-
-This repository provides a **modular OpenTofu/Terraform architecture** with three pre-configured deployment scenarios:
-
-| Scenario | Use Case | Monthly Cost | Database | Resources |
-|----------|----------|--------------|----------|-----------|
-| **Basic** | Personal projects, development | ~$3-10 | Cloud SQL (minimal) | 1 CPU, 1Gi RAM |
-| **Production** | Business automation, teams | ~$50-150 | Cloud SQL (enhanced) | 2 CPU, 2Gi RAM |
-| **NeonDB** | Cost optimization, serverless-first | ~$1-5 | NeonDB (serverless) | 1 CPU, 1Gi RAM |
+├── main.tf          # Root module orchestration
+├── variables.tf     # Input variables
+├── outputs.tf       # Output values
+├── locals.tf        # Local values and naming conventions
+└── versions.tf      # Provider requirements
+```
 
 ## 🚀 Quick Start
 
 ### 1. Prerequisites
 
-- Google Cloud account with billing enabled
-- [OpenTofu](https://opentofu.org/docs/intro/install/) >= 1.10 or [Terraform](https://terraform.io/downloads) >= 1.4
 - [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) installed and authenticated
+- [OpenTofu](https://opentofu.org/docs/intro/install/) >= 1.6 installed
 - [Docker](https://docs.docker.com/get-docker/) installed
+- A Google Cloud project with billing enabled
 
-### 2. GCP project preparation (run **once**)
+> **Note**: This configuration is compatible with both OpenTofu and Terraform. We recommend OpenTofu as it's the open-source fork that maintains full compatibility while being truly community-driven.
 
-```bash
-# Pick or create a dedicated project
-gcloud projects create n8n-on-gcr --name="n8n on Cloud Run"   # ⇠ skip if the project already exists
-
-# Set it as the default for your shell
-gcloud config set project n8n-on-gcr
-
-# Enable all services OpenTofu will need
-gcloud services enable \
-  run.googleapis.com \
-  artifactregistry.googleapis.com \
-  secretmanager.googleapis.com \
-  cloudbuild.googleapis.com \
-  compute.googleapis.com \
-  iam.googleapis.com
-
-# Give YOUR user rights to deploy & build (Owner works too)
-gcloud projects add-iam-policy-binding n8n-on-gcr \
-  --member="user:YOUR_EMAIL@example.com" \
-  --role="roles/editor"
-
-# Allow Cloud Build to push the Docker image
-PROJECT_NUM=$(gcloud projects describe n8n-on-gcr --format='value(projectNumber)')
-gcloud projects add-iam-policy-binding n8n-on-gcr \
-  --member="serviceAccount:${PROJECT_NUM}@cloudbuild.gserviceaccount.com" \
-  --role="roles/artifactregistry.writer"
-
-# (Optional) If you plan to use IAP you must move the project under an Organisation first.
-```
-
-You are now ready to let OpenTofu create infrastructure in **n8n-on-gcr**.
-
-### 3. Deploy Infrastructure
+### 2. Basic Deployment
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd n8n-gcr/iac
+# Clone and navigate to the IAC directory
+cd iac
 
-# Copy the example configuration
+# Copy and customize the configuration
 cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your specific values
 
-# Edit with your values and choose database type
-nano terraform.tfvars
-
-# Deploy
+# Initialize and deploy
 tofu init
+tofu plan
 tofu apply
 ```
 
-💡 **First-time tip:** set `container_image = "placeholder"` (or any dummy tag) in `terraform.tfvars`. OpenTofu just needs a valid string; the real image will be built and deployed by the GitHub Action in the next step.
+### 3. Container Image Setup
 
-### 4. Build and Deploy Container
+Before the first deployment, build and push your n8n container:
 
 ```bash
+# Build the custom n8n image
+docker build --platform linux/amd64 -t REGION-docker.pkg.dev/PROJECT_ID/REPO_NAME/n8n:latest .
+
 # Configure Docker authentication
-gcloud auth configure-docker $(tofu output -raw container_repository_url)
+gcloud auth configure-docker REGION-docker.pkg.dev
 
-# Build and push the n8n image
-IMAGE_NAME="$(tofu output -raw container_repository_url)/n8n:latest"
-docker build --platform linux/amd64 -t $IMAGE_NAME .
-docker push $IMAGE_NAME
-
-# Update Cloud Run with the new image
-tofu apply
+# Push the image
+docker push REGION-docker.pkg.dev/PROJECT_ID/REPO_NAME/n8n:latest
 ```
-
-> **Artifact Registry permissions**  
-> The principal that performs the `gcloud builds submit` or `docker push` **must** have  
-> `roles/artifactregistry.writer` on the project (and `roles/logging.logWriter` if you use Cloud Build).  
-> • Local push → grant the role to your user ( `user:you@example.com` ).  
-> • GitHub Actions → grant it to the Cloud Build service-account:  
-> `PROJECT_NUM=$(gcloud projects describe n8n-on-gcr --format='value(projectNumber)')`  
-> `gcloud projects add-iam-policy-binding n8n-on-gcr --member="serviceAccount:${PROJECT_NUM}@cloudbuild.gserviceaccount.com" --role="roles/artifactregistry.writer"`
-
-### 4. Access Your n8n Instance
-
-Your n8n instance will be available at the URL shown in the `n8n_url` output, protected by Google Identity Aware Proxy authentication.
 
 ## 📋 Configuration
 
-### Required Configuration
+### Required Variables
 
 ```hcl
 # terraform.tfvars
 gcp_project_id = "your-project-id"
-db_password = "secure-database-password"  
-n8n_encryption_key = "your-very-long-random-encryption-key-32-chars-minimum"
+db_password = "secure-database-password"
+n8n_encryption_key = "long-random-encryption-key-32-chars-minimum"
 iap_authorized_users = ["your-email@example.com"]
 ```
 
-### Database Options
+### Key Variables
 
-**Cloud SQL** (Managed PostgreSQL):
-- Consistent performance
-- Integrated backups and monitoring
-- Best for production workloads
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `gcp_project_id` | Google Cloud project ID | - | ✅ |
+| `db_password` | Database password (8+ chars) | - | ✅ |
+| `n8n_encryption_key` | n8n encryption key (32+ chars) | - | ✅ |
+| `iap_authorized_users` | Authorized user emails | - | ✅ |
+| `database_type` | Database type: `cloud_sql` or `neon` | `"cloud_sql"` | ❌ |
+| `neon_host` | NeonDB host (if using NeonDB) | `""` | ❌ |
+| `environment` | Environment name | `"dev"` | ❌ |
+| `gcp_region` | Google Cloud region | `"us-west2"` | ❌ |
+| `domain_name` | Custom domain (optional) | `""` | ❌ |
+| `cloud_run_cpu` | CPU allocation | `"2"` | ❌ |
+| `cloud_run_memory` | Memory allocation | `"2Gi"` | ❌ |
 
-**NeonDB** (Serverless PostgreSQL):
-- True serverless, scales to zero
-- Pay-per-use pricing
-- Global replication
-- **Automatic provisioning** with OpenTofu/Terraform
-- Best for cost optimization
+## 🔒 Security Features
 
-## 🔒 Security
+### Always-On Security
 
-Your n8n instance is automatically secured with:
+- **Identity Aware Proxy (IAP)**: Google authentication required for all access
+- **Secret Manager**: Secure storage for database passwords and encryption keys
+- **HTTPS-only**: Automatic HTTP to HTTPS redirect
+- **Private Cloud Run**: Service only accessible through load balancer
+- **Least privilege IAM**: Service accounts with minimal required permissions
 
-- **Identity Aware Proxy (IAP)**: Google SSO authentication required
-- **Authorized users only**: Email-based access control
-- **HTTPS-only**: Automatic SSL certificates and HTTP redirect
-- **Secret Manager**: Encrypted storage for sensitive data
-- **Private networking**: Service only accessible through load balancer
+### IAP Configuration
 
-### Managing Access
-
-To grant access to additional users:
-
-1. Add email addresses to `iap_authorized_users` in `terraform.tfvars`
-2. Run `tofu apply` to update IAM policies
-
-## 📁 Repository Structure
-
-```
-n8n-gcr/
-├── iac/                    # OpenTofu/Terraform infrastructure
-│   ├── modules/           # Reusable infrastructure modules  
-│   └── README.md         # Detailed technical documentation
-├── contrib/               # Community contributions
-└── docs/                 # Project documentation and delivery tracking
-```
-
-## 📚 Documentation
-
-- **[Infrastructure Documentation](iac/README.md)** - Detailed technical documentation for the modular architecture
-- **[NeonDB Setup Guide](docs/neondb-setup.md)** - Automatic database provisioning with OpenTofu
-- **[Automation Setup](docs/automation-setup.md)** - GitHub Actions for automated n8n updates
-
-## 🔧 Advanced Usage
-
-### Custom Domain
+IAP provides enterprise-grade access control:
 
 ```hcl
-domain_name = "n8n.yourdomain.com"
+iap_authorized_users = [
+  "admin@company.com",
+  "team@company.com"
+]
 ```
 
-After deployment, create a DNS A record pointing to the `load_balancer_ip` output.
+Users must authenticate with Google and be on the authorized list to access n8n.
 
-### Google OAuth Integration
+## 🏗️ Module Documentation
 
-For connecting n8n with Google services (Sheets, Drive, etc.):
+### Secrets Module (`modules/secrets/`)
 
-1. Enable required APIs in Google Cloud Console
-2. Configure OAuth consent screen
-3. Create OAuth client ID with your n8n URL
-4. Use client credentials in n8n Google service configurations
+Manages Secret Manager resources and IAM policies for secure credential storage.
+
+**Resources**:
+- Secret Manager secrets for database password and n8n encryption key
+- IAM bindings for service account access
+
+### Database Module (`modules/database/`)
+
+Manages Cloud SQL PostgreSQL instance optimized for n8n workloads. Alternatively, supports external databases like NeonDB.
+
+**Features**:
+- Configurable instance tiers (cost vs performance)
+- Environment-based backup policies
+- Connection logging for troubleshooting
+- Automatic deletion protection in production
+- Support for external PostgreSQL providers (NeonDB, etc.)
+
+### Container Module (`modules/container/`)
+
+Manages Artifact Registry for storing custom n8n Docker images.
+
+**Features**:
+- Docker format repository
+- Regional storage for performance
+- Integrated with Cloud Run deployment
+
+### Compute Module (`modules/compute/`)
+
+Manages Cloud Run service, service account, and container configuration.
+
+**Features**:
+- Serverless scaling (0-N instances)
+- Cloud SQL proxy integration
+- Comprehensive environment variable management
+- Health checks and startup probes
+
+### IAP Module (`modules/iap/`)
+
+Manages load balancer, IAP configuration, and SSL certificates.
+
+**Features**:
+- Global HTTPS load balancer
+- OAuth2 client and brand configuration
+- Google-managed SSL certificates
+- HTTP to HTTPS redirect
+- Network Endpoint Group for Cloud Run
+
+## 🎯 Database Options
+
+Choose between two database providers by setting the `database_type` variable:
+
+### Cloud SQL (Google Cloud)
+- **Use case**: Production workloads, enterprise environments
+- **Cost**: ~$15-100/month (depending on tier)
+- **Features**: Managed PostgreSQL, automatic backups, monitoring
+- **Configuration**: Set `database_type = "cloud_sql"`
+
+### NeonDB (Serverless PostgreSQL)
+- **Use case**: Cost optimization, development, serverless-first
+- **Cost**: ~$1-5/month (auto-scaling)
+- **Features**: Serverless database, automatic provisioning, global replication
+- **Configuration**: Set `database_type = "neon"` and provide `neon_api_key`
+
+## 🔧 Customization
+
+### Environment-Specific Configuration
+
+The `environment` variable affects resource configuration:
+
+- **dev**: Minimal resources, no backups, no deletion protection
+- **prod**: Enhanced resources, backups enabled, deletion protection
+
+### Custom Domain Setup
+
+1. Set `domain_name` variable
+2. Deploy infrastructure
+3. Configure DNS A record to point to the load balancer IP
+4. SSL certificate auto-provisions once DNS propagates
+
+### Resource Scaling
+
+Adjust resources based on your workload:
+
+```hcl
+# For heavy workloads
+cloud_run_cpu = "4"
+cloud_run_memory = "8Gi"
+cloud_run_max_instances = 10
+db_tier = "db-n1-standard-2"
+```
+
+## 📊 Monitoring and Troubleshooting
+
+### Useful Commands
+
+```bash
+# Check deployment status
+tofu output
+
+# View resource state
+tofu state list
+
+# Debug IAP issues
+gcloud compute backend-services get-health BACKEND_NAME --global
+
+# Check Cloud Run logs
+gcloud run services logs read n8n --region=REGION
+```
+
+### Common Issues
+
+1. **"Container not found"**: Build and push the n8n container first
+2. **"IAP access denied"**: Verify user email in `authorized_users` list
+3. **"SSL certificate pending"**: Check DNS configuration and propagation
+4. **"Database connection failed"**: Verify Cloud SQL proxy settings
+
+## 💰 Cost Optimization
+
+### Development
+- Use `db-f1-micro` instance
+- Set `min_instances = 0` for Cloud Run
+- Single region deployment
+
+### Production
+- Consider `db-n1-standard-1` for better performance
+- Set appropriate `max_instances` based on usage
+- Enable monitoring for cost tracking
+
+## 🔄 Updates and Maintenance
 
 ### Updating n8n
 
-#### Automated Updates (Recommended)
+1. Build new container image with updated n8n version
+2. Push to Artifact Registry
+3. Run `tofu apply` to deploy
 
-Set up GitHub Actions for automatic n8n updates:
+### Adding Users
 
-```bash
-# See detailed setup guide
-open docs/automation-setup.md
-```
+1. Update `iap_authorized_users` in terraform.tfvars
+2. Run `tofu apply`
+3. Users can immediately access after Google authentication
 
-**Features:**
-- 🔄 Daily monitoring of n8n releases
-- 🚀 Automatic Docker builds and pushes
-- 📦 GitHub releases with version tracking
-- 🎯 Optional auto-deployment to development
+### Backup and Recovery
 
-#### GitHub Variables & Secrets
+- **Development**: No automatic backups (cost optimization)
+- **Production**: Automatic backups enabled
+- Manual backups can be triggered via Google Cloud Console
 
-> Configure these in **Repository → Settings → Secrets and variables → Actions** so the `n8n-auto-update` workflow can build images and (optionally) deploy them.
+## 📚 Additional Resources
 
-**Repository secrets**
-
-| Name | Purpose |
-|------|---------|
-| `GCP_SA_KEY` | JSON key for the Google Cloud service account that can push to Artifact Registry and deploy to Cloud Run |
-
-**Repository variables**
-
-| Name | Example | Purpose |
-|------|---------|---------|
-| `GCP_PROJECT_ID` | `my-gcp-project` | Primary Google Cloud project that hosts Artifact Registry and Cloud Run |
-| `GCP_REGION` | `europe-west1` | (Optional) Default region for builds and deployments (defaults to `europe-west1` when omitted) |
-| `CLOUD_RUN_SERVICE_NAME` | `n8n` | (Optional) Cloud Run service name to update after each build |
-| `AUTO_DEPLOY_DEV` | `false` | `true` to automatically deploy the image to the dev environment after a successful build |
-| `GCP_PROJECT_ID_PROD` | `my-prod-project` | (Optional) Additional project ID to include in the build matrix for production |
-| `AUTO_DEPLOY_PROD` | `false` | (Optional) Flag to auto-deploy to production project if enabled |
-
-For a step-by-step walk-through, see the [Automation Setup](docs/automation-setup.md) guide.
-
-#### Manual Updates
-
-```bash
-# Pull latest n8n image and rebuild
-docker pull docker.n8n.io/n8nio/n8n:latest
-IMAGE_NAME="$(tofu output -raw container_repository_url)/n8n:latest"
-docker build --platform linux/amd64 -t $IMAGE_NAME .
-docker push $IMAGE_NAME
-
-# Deploy update
-tofu apply
-```
-
-## 💡 Cost Optimization Tips
-
-1. **Choose the right scenario**: Use Basic or NeonDB for development, Production for business use
-2. **Scale to zero**: Keep `min_instances = 0` to avoid idle costs
-3. **Monitor usage**: Set up billing alerts in Google Cloud Console
-4. **Database sizing**: Start with minimal tiers and scale up as needed
-5. **Regional deployment**: Choose regions close to your users
+- [n8n Documentation](https://docs.n8n.io/)
+- [Google Cloud Run Documentation](https://cloud.google.com/run/docs)
+- [Identity Aware Proxy Documentation](https://cloud.google.com/iap/docs)
+- [OpenTofu Documentation](https://opentofu.org/docs/)
+- [Terraform Google Provider](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
 
 ## 🤝 Contributing
 
-We welcome contributions! See the [contributing guide](CONTRIBUTING.md) for details on:
+To contribute improvements:
 
-- Adding new deployment scenarios
-- Improving the modular architecture  
-- Documentation improvements
-- Community examples and use cases
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🆘 Support
-
-- **Issues**: Report bugs and request features via GitHub Issues
-- **Discussions**: Join the community discussion for questions and tips
-- **Documentation**: Comprehensive guides available in the [iac/README.md](iac/README.md)
-
-## 🛠️ Troubleshooting
-
-### IAP shows "Error: Forbidden"
-If you reach a Google page that says "Error: Forbidden" after signing in:
-
-1. Confirm the email you authenticated with is **exactly** one of the addresses in `iap_authorized_users` in `terraform.tfvars`.
-2. Run `tofu apply` again to ensure OpenTofu created the IAM binding (`google_iap_web_iam_member`).
-3. Open the URL in an Incognito/Private window, click **Use another account**, and sign-in with the authorised address.
-4. If you still see the error, wait ~60 s – IAM changes can take a minute to propagate.
-
-> Quick check
-> ```bash
-> gcloud iap web get-iam-policy --project $PROJECT_ID \
->   --format="table(bindings.role, bindings.members)" | grep iap.httpsResourceAccessor
-> ```
-> Your email must appear under `roles/iap.httpsResourceAccessor`.
-
----
-
-### "service account … does not exist" during `tofu apply`
-OpenTofu creates the IAP service agent **service-${PROJECT_NUMBER}@gcp-sa-iap.iam.gserviceaccount.com** and then grants it `roles/run.invoker` on Cloud Run.  In new projects this account can take a few seconds to become visible. OpenTofu now waits 30 s (`time_sleep.wait_for_iap_sa`) but if you still hit the race re-run `tofu apply`.
-
----
-
-### Blank page saying **"Rate exceeded"**
-This comes from NeonDB when the free-tier connection limit is exceeded.
-
-* The stack now connects through Neon's built-in PgBouncer pooler endpoint (`-pooler.neon.tech`) and sets `DB_POSTGRESDB_POOL_SIZE=5` which is well within limits.
-* If you changed `DB_POSTGRESDB_POOL_SIZE` or opened many browser tabs, close extras or lower the value and re-deploy.
-
----
-
-### Neon **region not valid** error
-Neon expects region codes like `aws-us-east-1` or `aws-eu-central-1` – *not* regular AWS regions.  Set an appropriate value for `neon_region` in `terraform.tfvars`, for example:
-
-```hcl
-neon_region = "aws-eu-central-1"  # Frankfurt
-```
-
-Full list: https://neon.tech/docs/introduction/regions
-
----
-
-### Where is my n8n URL?
-After `tofu apply` finishes, run:
-
-```bash
-tofu output n8n_url
-```
-
-If you did not set `domain_name`, the output will be a **nip.io** host that already resolves to the load-balancer IP and has a valid SSL certificate.
-
----
-
-**Ready to automate your workflows?** Choose your deployment scenario and get started in minutes! 🚀 
-
-## 👤 About the Author
-
-<p align="center">
-  <a href="https://github.com/chreble" target="_blank">
-    <img src="https://github.com/chreble.png" width="100" height="100" alt="Christian Eble GitHub avatar" />
-  </a>
-</p>
-
-**Christophe EBLE** ([chreble](https://github.com/chreble)) is the maintainer of this repository. If you find this project useful, feel free to ⭐ the repo and drop him a note!
+1. Test changes with minimal configurations first
+2. Ensure backward compatibility
+3. Update documentation for any new variables or features
+4. Follow OpenTofu/Terraform best practices for module design 
