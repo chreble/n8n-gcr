@@ -1,4 +1,4 @@
-# n8n on Google Cloud Run - Modular OpenTofu Deployment
+# n8n on Google Cloud Run
 
 This directory contains a modular OpenTofu architecture for deploying n8n (workflow automation platform) on Google Cloud Run with Identity Aware Proxy (IAP) protection.
 
@@ -7,7 +7,6 @@ This directory contains a modular OpenTofu architecture for deploying n8n (workf
 The deployment is organized into focused, reusable modules:
 
 ```
-iac/
 ├── modules/
 │   ├── secrets/     # Secret Manager resources and IAM policies
 │   ├── database/    # Cloud SQL PostgreSQL or external database support
@@ -36,9 +35,6 @@ iac/
 ### 2. Basic Deployment
 
 ```bash
-# Clone and navigate to the IAC directory
-cd iac
-
 # Copy and customize the configuration
 cp terraform.tfvars.example terraform.tfvars
 # Edit terraform.tfvars with your specific values
@@ -71,8 +67,6 @@ docker push REGION-docker.pkg.dev/PROJECT_ID/REPO_NAME/n8n:latest
 ```hcl
 # terraform.tfvars
 gcp_project_id = "your-project-id"
-db_password = "secure-database-password"
-n8n_encryption_key = "long-random-encryption-key-32-chars-minimum"
 iap_authorized_users = ["your-email@example.com"]
 ```
 
@@ -81,8 +75,6 @@ iap_authorized_users = ["your-email@example.com"]
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
 | `gcp_project_id` | Google Cloud project ID | - | ✅ |
-| `db_password` | Database password (8+ chars) | - | ✅ |
-| `n8n_encryption_key` | n8n encryption key (32+ chars) | - | ✅ |
 | `iap_authorized_users` | Authorized user emails | - | ✅ |
 | `database_type` | Database type: `cloud_sql` or `neon` | `"cloud_sql"` | ❌ |
 | `neon_host` | NeonDB host (if using NeonDB) | `""` | ❌ |
@@ -282,4 +274,7 @@ To contribute improvements:
 1. Test changes with minimal configurations first
 2. Ensure backward compatibility
 3. Update documentation for any new variables or features
-4. Follow OpenTofu/Terraform best practices for module design 
+4. Follow OpenTofu/Terraform best practices for module design
+
+**You're ready!**
+This workflow ensures a clean, repeatable, and secure setup for your infrastructure. 
