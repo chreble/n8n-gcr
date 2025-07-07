@@ -47,7 +47,7 @@ output "endpoint_id" {
   value       = neon_endpoint.main.id
 }
 
-output "region" {
+output "region_id" {
   description = "NeonDB region"
   value       = neon_project.main.region_id
 }
@@ -55,4 +55,4 @@ output "region" {
 output "postgres_version" {
   description = "PostgreSQL version"
   value       = neon_project.main.pg_version
-} 
+}

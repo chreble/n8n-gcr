@@ -39,7 +39,7 @@ module "neondb" {
 
   project_name              = var.neon_project_name
   postgres_version          = var.neon_postgres_version
-  region                    = var.neon_region
+  region_id                 = var.neon_region
   database_name             = var.db_name
   database_user             = var.db_user
   compute_min               = var.neon_compute_min
@@ -62,6 +62,12 @@ module "container" {
   region          = var.gcp_region
   repository_name = local.resource_names.artifact_repo
   labels          = local.gcp_labels
+
+  # Removed build-related variables now handled outside Terraform
+}
+
+locals {
+  db_connection_uri = length(module.neondb) > 0 ? module.neondb[0].connection_uri : module.cloud_sql[0].connection_uri
 }
 
 # Compute module - manages Cloud Run service and service account
@@ -83,6 +89,14 @@ module "compute" {
   db_password_secret_id          = module.secrets.db_password_secret_id
   n8n_encryption_key_secret_id   = module.secrets.n8n_encryption_key_secret_id
   labels                         = local.gcp_labels
+  database_connection_uri        = local.db_connection_uri
+  database_host                 = var.database_type == "neon" ? module.neondb[0].host : ""
+
+  # Ensure DB modules are created first
+  depends_on = [
+    module.neondb,
+    module.cloud_sql
+  ]
 
   environment_variables = {
     # Basic n8n configuration
@@ -94,7 +108,7 @@ module "compute" {
     DB_TYPE                = "postgresdb"
     DB_POSTGRESDB_DATABASE = var.db_name
     DB_POSTGRESDB_USER     = var.db_user
-    DB_POSTGRESDB_HOST     = var.database_type == "cloud_sql" ? "/cloudsql/${module.cloud_sql[0].instance_connection_name}" : replace(module.neondb[0].host, ".neon.tech", "-pooler.neon.tech")
+    DB_POSTGRESDB_HOST     = var.database_type == "cloud_sql" ? "/cloudsql/${module.cloud_sql[0].instance_connection_name}" : module.neondb[0].host
     DB_POSTGRESDB_PORT     = "5432"
     DB_POSTGRESDB_SCHEMA   = "public"
     DB_POSTGRESDB_SSL      = var.database_type == "neon" ? "true" : "disable"
@@ -122,15 +136,13 @@ module "compute" {
   startup_probe_timeout       = 240
   startup_probe_period        = 15
   startup_probe_failure_threshold = 10
-
-  depends_on = [module.cloud_sql, module.neondb, module.container]
 }
 
 # IAP module - manages load balancer, IAP, and SSL certificates
 module "iap" {
   source = "./modules/iap"
 
-  project_id               = var.gcp_project_id
+  project_id               = data.google_project.project.number
   region                   = var.gcp_region
   name_prefix              = local.resource_names.cloud_run_service
   cloud_run_service_name   = module.compute.service_name

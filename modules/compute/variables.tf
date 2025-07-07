@@ -109,4 +109,16 @@ variable "labels" {
   description = "Labels to apply to resources"
   type        = map(string)
   default     = {}
+}
+
+variable "database_connection_uri" {
+  description = "The database connection URI. This creates an implicit dependency on the database."
+  type        = string
+  sensitive   = true
+}
+
+variable "database_host" {
+  description = "Hostname for direct TCP connection to the database (used when not using Cloud SQL socket)."
+  type        = string
+  default     = ""
 } 

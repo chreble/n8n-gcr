@@ -11,4 +11,4 @@ output "repository_url" {
 output "repository_name" {
   description = "Full name of the Artifact Registry repository"
   value       = google_artifact_registry_repository.main.name
-} 
+}

@@ -14,7 +14,7 @@ terraform {
 resource "neon_project" "main" {
   name       = var.project_name
   pg_version = var.postgres_version
-  region_id  = var.region
+  region_id  = var.region_id
   org_id     = var.org_id
 }
 
@@ -31,21 +31,19 @@ resource "neon_branch" "infra" {
   parent_id  = null      # use the project's default branch
 }
 
-locals {
-  active_branch_id = neon_branch.infra.id
-}
+
 
 # Create read-write endpoint for the branch (required before roles)
 resource "neon_endpoint" "main" {
   project_id = neon_project.main.id
-  branch_id  = local.active_branch_id
+  branch_id  = neon_branch.infra.id
   type       = "read_write"
 }
 
 # Create database role for n8n (requires endpoint)
 resource "neon_role" "main" {
   project_id = neon_project.main.id
-  branch_id  = local.active_branch_id
+  branch_id  = neon_branch.infra.id
   name       = var.database_user
 
   depends_on = [neon_endpoint.main]
@@ -54,7 +52,7 @@ resource "neon_role" "main" {
 # Create database for n8n (requires role)
 resource "neon_database" "main" {
   project_id = neon_project.main.id
-  branch_id  = local.active_branch_id
+  branch_id  = neon_branch.infra.id
   name       = var.database_name
   owner_name = var.database_user
 

@@ -1,8 +1,16 @@
+# ================================================================
+# Global / Shared Variables
+# ================================================================
+
 variable "gcp_project_id" {
   description = "Google Cloud project ID where resources will be created."
   type        = string
   # No default - must be provided by user
 }
+
+# ================================================================
+# Environment Settings
+# ================================================================
 
 variable "environment" {
   description = "Environment name (e.g., dev, staging, prod)"
@@ -20,11 +28,19 @@ variable "owner_email" {
   default     = ""
 }
 
+# ================================================================
+# GCP Region & Labeling
+# ================================================================
+
 variable "gcp_region" {
   description = "Google Cloud region for deployment."
   type        = string
   default     = "europe-west1"
 }
+
+# ================================================================
+# Database Selection
+# ================================================================
 
 variable "database_type" {
   description = "Database type to use: 'cloud_sql' or 'neon'"
@@ -36,6 +52,10 @@ variable "database_type" {
   }
 }
 
+# ================================================================
+# Common Database Credentials (used by both Cloud SQL & Neon)
+# ================================================================
+
 variable "db_name" {
   description = "Name for the PostgreSQL database."
   type        = string
@@ -43,7 +63,7 @@ variable "db_name" {
 }
 
 variable "db_user" {
-  description = "Username for the Cloud SQL database user."
+  description = "Username for the database user."
   type        = string
   default     = "n8n-user"
 }
@@ -58,6 +78,10 @@ variable "db_password" {
     error_message = "Database password must be at least 8 characters long when provided (leave empty for auto-generation)."
   }
 }
+
+# ================================================================
+# NeonDB Module Variables
+# ================================================================
 
 # NeonDB-specific variables (for automatic provisioning)
 variable "neon_org_id" {
@@ -92,12 +116,12 @@ variable "neon_postgres_version" {
 }
 
 variable "neon_region" {
-  description = "NeonDB region (e.g., aws-us-east-1, aws-eu-west-1)"
+  description = "NeonDB region (e.g., aws-us-east-1, aws-eu-central-1)"
   type        = string
-  default     = "aws-us-east-1"
+  default     = "aws-eu-central-1"
   
   validation {
-    condition = can(regex("^(aws|gcp|azure)-[a-z0-9-]+$", var.neon_region))
+    condition = can(regex("^(aws|azure)-[a-z0-9-]+$", var.neon_region))
     error_message = "Neon region must be in format 'cloud-region' (e.g., aws-us-east-1)."
   }
 }
@@ -182,6 +206,10 @@ variable "n8n_encryption_key" {
   }
 }
 
+# ================================================================
+# Cloud SQL Module Variables
+# ================================================================
+
 variable "db_tier" {
   description = "Cloud SQL instance tier. Use db-f1-micro for lowest cost."
   type        = string
@@ -214,11 +242,19 @@ variable "cloud_sql_storage_size" {
   }
 }
 
+# ================================================================
+# Container / Artifact Registry Variables
+# ================================================================
+
 variable "artifact_repo_name" {
   description = "Name for the Artifact Registry repository to store the n8n Docker image."
   type        = string
   default     = "n8n-repo"
 }
+
+# ================================================================
+# Compute / Cloud Run Variables
+# ================================================================
 
 variable "cloud_run_service_name" {
   description = "Name for the Cloud Run service."
@@ -248,56 +284,48 @@ variable "cloud_run_memory" {
   default     = "2Gi"
 }
 
-variable "cloud_run_max_instances" {
-  description = "Maximum number of instances for Cloud Run service."
-  type        = number
-  default     = 1
-  validation {
-    condition     = var.cloud_run_max_instances >= 1
-    error_message = "Maximum instances must be at least 1."
-  }
-}
-
 variable "cloud_run_container_port" {
-  description = "Internal port the n8n container listens on."
+  description = "Container port that n8n listens on inside Cloud Run."
   type        = number
   default     = 5678
 }
 
+variable "cloud_run_max_instances" {
+  description = "Maximum number of Cloud Run instances."
+  type        = number
+  default     = 3
+}
+
+# ================================================================
+# Misc / IAP & Authentication
+# ================================================================
+
 variable "generic_timezone" {
-  description = "Timezone for n8n operations."
+  description = "Default timezone for n8n workflows"
   type        = string
   default     = "UTC"
 }
 
-# --- Identity Aware Proxy Variables --- #
 variable "iap_authorized_users" {
-  description = "List of email addresses authorized to access n8n through IAP."
+  description = "List of Google accounts allowed to access the IAP-protected service"
   type        = list(string)
-  validation {
-    condition = length(var.iap_authorized_users) > 0
-    error_message = "At least one authorized user email must be provided for IAP access."
-  }
+  default     = []
 }
 
 variable "oauth_brand_name" {
-  description = "Name for the OAuth brand (shown on consent screen)."
+  description = "OAuth brand name used by IAP"
   type        = string
-  default     = "n8n Workflow Automation"
+  default     = ""
 }
 
 variable "oauth_support_email" {
-  description = "Support email for the OAuth consent screen."
+  description = "Support email displayed in OAuth consent screen"
   type        = string
   default     = ""
-  validation {
-    condition = can(regex("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", var.oauth_support_email)) || var.oauth_support_email == ""
-    error_message = "Support email must be a valid email address."
-  }
 }
 
 variable "domain_name" {
-  description = "Optional custom domain name for the load balancer. If not provided, will use the default Google-managed domain."
+  description = "Optional custom domain for the Cloud Run service"
   type        = string
   default     = ""
 } 

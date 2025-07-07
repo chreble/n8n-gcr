@@ -19,17 +19,6 @@ variable "postgres_version" {
   }
 }
 
-variable "region" {
-  description = "NeonDB region (e.g., aws-us-east-1, aws-eu-west-1)"
-  type        = string
-  default     = "aws-eu-central-1"
-  
-  validation {
-    condition = can(regex("^(aws|gcp|azure)-[a-z0-9-]+$", var.region))
-    error_message = "Neon region must be in format 'cloud-region' (e.g., aws-us-east-1)."
-  }
-}
-
 variable "database_name" {
   description = "Name of the database to create"
   type        = string
@@ -112,4 +101,9 @@ variable "branch_size_limit" {
   description = "Branch logical size limit in bytes"
   type        = number
   default     = 1073741824  # 1 GB
-} 
+}
+
+variable "region_id" {
+  description = "The ID of the region where the project is created."
+  type        = string
+}

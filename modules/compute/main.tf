@@ -126,6 +126,11 @@ resource "google_cloud_run_v2_service" "main" {
         }
       }
 
+      env {
+        name = "DB_POSTGRESDB_HOST"
+        value = var.database_connection_name != "" ? "/cloudsql/${var.database_connection_name}" : var.database_host
+      }
+
       startup_probe {
         initial_delay_seconds = var.startup_probe_initial_delay
         timeout_seconds       = var.startup_probe_timeout

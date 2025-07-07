@@ -23,4 +23,4 @@ variable "labels" {
   description = "Labels to apply to resources"
   type        = map(string)
   default     = {}
-} 
+}

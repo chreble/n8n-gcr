@@ -5,6 +5,7 @@
 
 # REQUIRED: Google Cloud project where resources will be created
 gcp_project_id = "n8n-on-gcr"
+oauth_brand_name = "n8n Workflow Automation"
 oauth_support_email = "ceble@dialectron.chat"
 
 # REQUIRED: At least one email that can access n8n via IAP
@@ -22,3 +23,4 @@ neon_org_id   = "org-lucky-sound-33119804"
 # Notes:
 # • Leave db_password and n8n_encryption_key empty – secure values will be auto-generated.
 # • The default region is europe-west1; override with gcp_region if needed. 
+# • The default NeonDB region is aws-eu-central-1; override with neon_region if needed.
