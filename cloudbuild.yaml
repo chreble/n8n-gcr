@@ -1,0 +1,5 @@
+# cloudbuild.yaml
+steps:
+  - name: 'ubuntu'
+    entrypoint: 'bash'
+    args: ['-c', 'echo Hello World']
